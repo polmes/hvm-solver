@@ -1,146 +1,182 @@
-% function [CL,Cl,CM,CDi] = hvm()
-% user parameters
-
-    % b = 1;
-    clear variables;
-    lambda = 0.5;
-    AR = 10;
-    S = 1/AR;
-    sweep = 0; % deg2rad(10);
-    M = 100;
-    alpha_cr = deg2rad(-1.8);
-    alpha_ct = deg2rad(-1.8);
-    epsilon_cr = 0; % deg2rad(0);
-    epsilon_ct = 0; % deg2rad(5);
-    % flap_inf = 0.4;
-    % flap_sup = 0.7;
-    % x_h = 0.8;
-    % eta = deg2rad(15);
-
-    alpha = deg2rad(4);
-    beta = deg2rad(0);
+function [CL,Cl,CM,CD] = hvm(AR,lambda,sweep,alpha_cr,alpha_ct,epsilon_cr,epsilon_ct,alpha,beta,M,dist,flap,x_h,y_inf,y_sup,eta)
+    if (nargin == 0)
+        clc;
+        disp('WING PARAMETERS');
+        AR = input('Aspect Ratio: ');
+        lambda = input('Taper Ratio: ');
+        sweep = deg2rad(input('Quarter-chord Sweep Angle (º): '));
+        
+        disp('AERODYNAMIC TWIST');
+        alpha_cr = deg2rad(input('Root airfoil alpha_l0 (º): '));
+        alpha_ct = deg2rad(input('Tip airfoil alpha_l0 (º): '));
+        
+        disp('GEOMETRIC TWIST');
+        epsilon_cr = deg2rad(input('Root airfoil epsilon (º): '));
+        epsilon_ct = deg2rad(input('Tip airfoil epsilon (º): '));
+        
+        disp('AERODYNAMIC CONDITIONS');
+        alpha = deg2rad(input('Angle of attack (º): '));
+        beta = deg2rad(input('Cross-wind angle (º): '));
+        
+        disp('SIMULATION PARAMETERS');
+        M = input('Number of panels: ');
+        dist = input('(a) Uniform\n(b) Full cosine\nDistribution for geometry discretization (choose from the above a or b): ','s');
+        
+        disp('FLAP ANALYSIS');
+        flap = input('Include a flap? (y/n) ','s');
+    elseif (nargin < 12)
+        error('Not enough input arguments');
+    elseif (nargin > 16)
+        error('Too many input arguments');
+    end
+    
+    % Global variables
+    N = M + 1;
+    S = 1/AR; % area, assuming b = 1
     Vinf = [cos(alpha)*cos(beta) cos(alpha)*sin(beta) sin(alpha)]; % unit vector
-    % Globals
-    N = M+1;
+    
+    % Root and tip chords
+    cr = 2 / (AR * (lambda + 1));
+    cc = lambda * cr;
 
-    % wing parameters
-
-    cr = 2/(AR*(lambda+1));
-    ct = lambda*cr;
-
-    % control_aero vindrà aquí quan tot sigui una f
-
-    % discretization
-
-    y = linspace(-0.5,0.5,N);
-    % full cos too (ap. 5)
-
+    % Geometry discretization distribution
+    if (dist == 'a')
+        y = linspace(-0.5,0.5,N); % uniform
+    elseif (dist == 'b')
+        k = 0:M;
+        y = 1/2 * (1 - cos(k/M * pi)) - 0.5; % full cosine
+    else
+        error('Invalid type of distribution');
+    end
+    
+    % Chords
     c = zeros(1,N);
-    c(y>=0) = cr+(ct-cr)*2.*y(y>=0);
-    c(y<0) = cr-(ct-cr)*2.*y(y<0);
-
-    [ac,cp,c_ac] = control_aero(N,M,cr,c,sweep,y);
-    cp_y = cp(2,:);
-
-    % aerodynamic twist
-
-    alpha_l0(cp_y>=0) = alpha_cr+(alpha_ct-alpha_cr)*2.*cp_y(cp_y>=0);
-    alpha_l0(cp_y<0) = alpha_cr-(alpha_ct-alpha_cr)*2.*cp_y(cp_y<0);
-
-    % geometric twist
-
-    epsilon(cp_y>=0) = epsilon_cr+(epsilon_ct-epsilon_cr)*2.*cp_y(cp_y>=0);
-    epsilon(cp_y<0) = epsilon_cr-(epsilon_ct-epsilon_cr)*2.*cp_y(cp_y<0);
-
-    % flaps
-
-    % theta_h = acos(1-2*x_h*c_ac); % c_ac la te feta el freeman
-    % delta_alpha_l0 = zeros(1,2); % el 2 ha de ser M
-    % reg_flap = (y > flap_inf & y < flap_sup | y < -flap_inf & y > -flap_sup);
-    % delta_alpha_l0(reg_flap) = -(1-(theta_h(reg_flap)/pi)+(sin(theta_h(reg_flap))/pi))*(eta);
-    % alpha_l0 = alpha_l0+delta_alpha_l0;
-
-
-    % normal vectors
-
-    nx = sin(epsilon - alpha_l0);
-    ny = zeros(1,M);
-    nz = cos(epsilon - alpha_l0);
-
-    n = [nx;ny;nz];
-
-    % delta_y array
-
-    delta_y = y(2:N) - y(1:M);
-
-    [BV,TV] = bv_tv(ac, alpha, beta, delta_y, y, M);
+    right = (y >= 0);
+    c(right) = cr + (cc - cr) * 2 .* y(right);
+    left = (y < 0);
+    c(left) = cr - (cc - cr) * 2 .* y(left);
     
-    BV1 = [ac(1,:); ac(2,:) - abs(delta_y)/2; ac(3,:)];
-    BV2 = [ac(1,:); ac(2,:) + abs(delta_y)/2; ac(3,:)];
-    
+    % Panel lengths
     y1 = y(1:M);
     y2 = y(2:N);
+    delta_y = y2 - y1;
+    
+    % Mid Chords
+    c1 = c(1:M);
+    c2 = c(2:N);
+    c_AC = c1 + (c2 - c1)/2;
+    
+    % Aerodynamic Centers
+    y_AC = y1 + abs(y2 - y1)/2;
+    x_AC = cr/4 + tan(sweep) * abs(y_AC);
+    AC = [x_AC; y_AC; zeros(1,M)];
+    
+    % Control Points
+    y_CP = y_AC;
+    x_CP = x_AC + c_AC/2; 
+    CP = [x_CP; y_CP; zeros(1,M)];
+    CP_right = (y_CP >= 0);
+    CP_left = (y_CP < 0);
+    
+    % Aerodynamic twist
+    alpha_l0 = zeros(1,M);
+    alpha_l0(CP_right) = alpha_cr + (alpha_ct - alpha_cr) * 2 .* y_CP(CP_right);
+    alpha_l0(CP_left) = alpha_cr - (alpha_ct - alpha_cr) * 2 .* y_CP(CP_left);
+
+    % Geometric twist
+    epsilon = zeros(1,M);
+    epsilon(CP_right) = epsilon_cr + (epsilon_ct - epsilon_cr) * 2 .* y_CP(CP_right);
+    epsilon(CP_left) = epsilon_cr - (epsilon_ct - epsilon_cr) * 2. * y_CP(CP_left);
+
+    % Flap parameters
+    if (flap == 'y' || flap == 'Y')
+        flap = true;
+        
+        if (nargin == 0)
+            x_h = input('Flap hinge x position (in tenths of chord): ') / 10;
+            y_inf = input('Flap hinge y start position (in tenths of semispan): ') / 20;
+            y_sup = input('Flap hinge y end position (in tenths of semispan): ') / 20;
+            eta = deg2rad(input('Flap deflection angle (º): '));
+        elseif (nargin < 16)
+            error('Not enough input arguments for flap analysis');
+        end
+    else
+        flap = false;
+    end
+    
+    % Flap analysis
+    if (flap)
+        % Thin Airfoil Theory
+        theta_h = acos(1 - 2 * x_h .* c_AC);
+        delta_alpha_l0 = zeros(1,M);
+        reg_flap = (y_CP >= y_inf & y_CP <= y_sup | y_CP <= -y_inf & y_CP >= -y_sup);
+        delta_alpha_l0(reg_flap) = -(1 - theta_h(reg_flap)/pi + sin(theta_h(reg_flap))/pi) * eta;
+
+        % Correction factor
+        x_factor = deg2rad([10,20,30,40,50,60,70]);
+        y_factor = [0.8,0.7,0.53,0.45,0.4,0.36,0.34];
+        coef_factor = polyfit(x_factor,y_factor,6);
+        factor = @(x) coef_factor(1)*x.^6 + coef_factor(2)*x.^5 + coef_factor(3)*x.^4+ coef_factor(4)*x.^3+ coef_factor(5)*x.^2 + coef_factor(6)*x + + coef_factor(7);
+        delta_alpha_l0 = delta_alpha_l0 * factor(eta);
+        alpha_l0 = alpha_l0 + delta_alpha_l0;
+    end
+
+    % Normal vectors
+    n = [sin(epsilon - alpha_l0); zeros(1,M); cos(epsilon - alpha_l0)];
+    
+    % Bounding Vortices
+    BV1 = [AC(1,:); AC(2,:) - abs(delta_y)/2; AC(3,:)];
+    BV2 = [AC(1,:); AC(2,:) + abs(delta_y)/2; AC(3,:)];
+    
+    % Trailing Vortices
     tmp = 20 * ones(1,M);
     TV1 = [tmp; y1 + tmp  * tan(beta); tmp  * tan(alpha)];
-    TV2 = [tmp; y2 + tmp  * tan(beta); tmp  * tan(alpha)];
-    
-    in = combvec(1:M,1:M);
-    at = TV1(:,in(1,:));
-    bt = BV1(:,in(1,:));
-    ct = BV2(:,in(1,:));
-    dt = TV2(:,in(1,:));
-    
-    vt = uvwt(cp(:,in(2,:)),at,bt) + uvwt(cp(:,in(2,:)),bt,ct) + uvwt(cp(:,in(2,:)),ct,dt);
-    At = reshape(dot(vt,n(:,in(2,:)),1),[M M])';
-    
-    A = zeros(M);
-    v_array = zeros(3,M,M);
-    w_wake = zeros(M);
-    for i = 1:M % control points
-        for j = 1:M % wakes
-            % A to B, B to C, C to D
-            aa = TV(:,1,j);
-            bb = BV(:,1,j);
-            cc = BV(:,2,j);
-            dd = TV(:,2,j);
+    TV2 = [tmp; y2 + tmp  * tan(beta); tmp  * tan(alpha)]; 
 
-            % Should be able to simplify by using array of v's and a,b,c,d
-            % calculated from in(:,:) matrix. Keep uvw() function
-            v = uvw(cp(:,i),aa,bb) + uvw(cp(:,i),bb,cc) + uvw(cp(:,i),cc,dd);
-            v_array(:,i,j) = v;
-            v_wake = uvw(ac(:,i),aa,bb) + uvw(ac(:,i),cc,dd);
-            w_wake(i,j) = v_wake(3);
-%             v_array(:,i) = v_array(:,i) + v;
-            
-            A(i,j) = v' * n(:,i);
-        end
+    % i's and j's
+    ij = ndgrid(1:M,1:M); % combvec equivalent
+    in = zeros(2,M*M); % indices
+    in(1,:) = reshape(ij,[1 M*M]);
+    in(2,:) = reshape(ij',[1 M*M]);
+    
+    % A to B, B to C, C to D
+    aa = TV1(:,in(1,:));
+    bb = BV1(:,in(1,:));
+    cc = BV2(:,in(1,:));
+    dd = TV2(:,in(1,:));
+    
+    % Calculate induced velocity at P by vortex line from 1 to 2
+    function v = uvw(pp,p1,p2)
+        r0 = p2 - p1;
+        r1 = pp - p1;
+        r2 = pp - p2;
+        r1xr2 = cross(r1,r2);
+        v = 1/(4*pi) * bsxfun(@times, dot(r0, bsxfun(@rdivide, r1, sqrt(sum(r1.^2))) - bsxfun(@rdivide, r2, sqrt(sum(r2.^2))), 1), bsxfun(@rdivide, r1xr2, dot(r1xr2, r1xr2, 1)));
     end
-    RHS = -(Vinf * n)';
-
-    gamma = linsolve(A,RHS)';
-    gammat = linsolve(At,RHS)';
     
-    Cl = 2 ./ (delta_y .* c_ac) .* (gamma .* delta_y);
-    CL = (2/S) * (delta_y * gamma'); % 1/AR = S
+    % Induced velocity at CP (i) by horshoe vortex (j)
+    v = uvw(CP(:,in(2,:)),aa,bb) + uvw(CP(:,in(2,:)),bb,cc) + uvw(CP(:,in(2,:)),cc,dd);
+    wake = uvw(AC(:,in(2,:)),aa,bb) + uvw(AC(:,in(2,:)),cc,dd);
     
-    CLt = (2/S) * (delta_y * gammat');
+    % System of equations
+    A = reshape(dot(v,n(:,in(2,:)),1),[M M])'; % influence coefficients
+    RHS = -(Vinf * n)'; % normal velocity
+    gamma = linsolve(A,RHS)'; % circulation
     
-    % induced drag
-%     alpha_i = -v_array(3,:) / Vinf(1);
-%     CDi = -(2/S) * sum(gamma .* delta_y * sum(gamma .* v_wake(3,:)));
+    % Lift coefficient
+    CL = (2/S) * (delta_y * gamma'); % whole wing value
+    Cl = 2 ./ (delta_y .* c_AC) .* (gamma .* delta_y); % distribution
     
-    CDi = 0;
-    for i = 1:M
-        CDj = 0;
-        for j = 1:M
-            CDj = CDj + gamma(j) * w_wake(i,j);
-        end
-        CDi = CDi + CDj * gamma(i) * delta_y(i);
-    end
-    CDi = -(2/S) * CDi;
-
-    % coefficient moment
-
-    c_aero = (2*cr/3) * ((1+lambda+lambda^2)/(1+lambda));
-    CM = -2/(S * c_aero) * sum(gamma .* ac(1,:) .* delta_y) * cos(alpha); % LE
-% end
+    % Pitching moment coefficient about the leading edge
+    c_aero = (2/3 * cr) * (1 + lambda+ lambda^2) / (1 + lambda);
+    CM = -2/(S * c_aero) * sum(gamma .* AC(1,:) .* delta_y) * cos(alpha);
+    
+    % Induced drag coefficient
+    w_wake = reshape(wake(3,:),[M M])';
+    CD = -(2/S) * sum(gamma .* delta_y .* (gamma * w_wake));
+    
+    % Plots
+    plot(y_CP,Cl);
+    xlabel('$$\frac{y}{b}$$','Interpreter','latex');
+    ylabel('$$C_l$$','Interpreter','latex');
+end
