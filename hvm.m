@@ -1,22 +1,23 @@
 function [CL,Cl,CM,CD] = hvm(AR,lambda,sweep,alpha_cr,alpha_ct,epsilon_cr,epsilon_ct,alpha,beta,M,dist,flap,x_h,y_inf,y_sup,eta)
     if (nargin == 0)
         clc;
+        
         disp('WING PARAMETERS');
         AR = input('Aspect Ratio: ');
         lambda = input('Taper Ratio: ');
-        sweep = deg2rad(input('Quarter-chord Sweep Angle (º): '));
+        sweep = input('Quarter-chord Sweep Angle (º): ');
         
         disp('AERODYNAMIC TWIST');
-        alpha_cr = deg2rad(input('Root airfoil alpha_l0 (º): '));
-        alpha_ct = deg2rad(input('Tip airfoil alpha_l0 (º): '));
+        alpha_cr = input('Root airfoil alpha_l0 (º): ');
+        alpha_ct = input('Tip airfoil alpha_l0 (º): ');
         
         disp('GEOMETRIC TWIST');
-        epsilon_cr = deg2rad(input('Root airfoil epsilon (º): '));
-        epsilon_ct = deg2rad(input('Tip airfoil epsilon (º): '));
+        epsilon_cr = input('Root airfoil epsilon (º): ');
+        epsilon_ct = input('Tip airfoil epsilon (º): ');
         
         disp('AERODYNAMIC CONDITIONS');
-        alpha = deg2rad(input('Angle of attack (º): '));
-        beta = deg2rad(input('Cross-wind angle (º): '));
+        alpha = input('Angle of attack (º): ');
+        beta = input('Cross-wind angle (º): ');
         
         disp('SIMULATION PARAMETERS');
         M = input('Number of panels: ');
@@ -30,14 +31,35 @@ function [CL,Cl,CM,CD] = hvm(AR,lambda,sweep,alpha_cr,alpha_ct,epsilon_cr,epsilo
         error('Too many input arguments');
     end
     
+    % Aspect Ratio
+    if (AR < 0)
+        error('Invalid Aspect Ratio');
+    elseif (AR < 5)
+        warning('Horshoe Vortex Method may not provide accurate results for such a low aspect ratio');
+    end
+    
+    % Taper Ratio
+    if (lambda < 0 || lambda > 1)
+        error('Invalid Taper Ratio');
+    end
+    
+    % Root and tip chords
+    c_r = 2 / (AR * (lambda + 1));
+    c_t = lambda * c_r;
+    
+    % Angles
+    sweep = deg2rad(sweep);
+    alpha_cr = deg2rad(alpha_cr);
+    alpha_ct = deg2rad(alpha_ct);
+    epsilon_cr = deg2rad(epsilon_cr);
+    epsilon_ct = deg2rad(epsilon_ct);
+    alpha = deg2rad(alpha);
+    beta = deg2rad(beta);
+    
     % Global variables
     N = M + 1;
     S = 1/AR; % area, assuming b = 1
     Vinf = [cos(alpha)*cos(beta) cos(alpha)*sin(beta) sin(alpha)]; % unit vector
-    
-    % Root and tip chords
-    cr = 2 / (AR * (lambda + 1));
-    cc = lambda * cr;
 
     % Geometry discretization distribution
     if (dist == 'a')
@@ -52,9 +74,9 @@ function [CL,Cl,CM,CD] = hvm(AR,lambda,sweep,alpha_cr,alpha_ct,epsilon_cr,epsilo
     % Chords
     c = zeros(1,N);
     right = (y >= 0);
-    c(right) = cr + (cc - cr) * 2 .* y(right);
+    c(right) = c_r + (c_t - c_r) * 2 .* y(right);
     left = (y < 0);
-    c(left) = cr - (cc - cr) * 2 .* y(left);
+    c(left) = c_r - (c_t - c_r) * 2 .* y(left);
     
     % Panel lengths
     y1 = y(1:M);
@@ -68,7 +90,7 @@ function [CL,Cl,CM,CD] = hvm(AR,lambda,sweep,alpha_cr,alpha_ct,epsilon_cr,epsilo
     
     % Aerodynamic Centers
     y_AC = y1 + abs(y2 - y1)/2;
-    x_AC = cr/4 + tan(sweep) * abs(y_AC);
+    x_AC = c_r/4 + tan(sweep) * abs(y_AC);
     AC = [x_AC; y_AC; zeros(1,M)];
     
     % Control Points
@@ -93,10 +115,10 @@ function [CL,Cl,CM,CD] = hvm(AR,lambda,sweep,alpha_cr,alpha_ct,epsilon_cr,epsilo
         flap = true;
         
         if (nargin == 0)
-            x_h = input('Flap hinge x position (in tenths of chord): ') / 10;
-            y_inf = input('Flap hinge y start position (in tenths of semispan): ') / 20;
-            y_sup = input('Flap hinge y end position (in tenths of semispan): ') / 20;
-            eta = deg2rad(input('Flap deflection angle (º): '));
+            x_h = input('Flap hinge x position (in tenths of chord): ');
+            y_inf = input('Flap hinge y start position (in tenths of semispan): ');
+            y_sup = input('Flap hinge y end position (in tenths of semispan): ');
+            eta = input('Flap deflection angle (º): ');
         elseif (nargin < 16)
             error('Not enough input arguments for flap analysis');
         end
@@ -106,12 +128,18 @@ function [CL,Cl,CM,CD] = hvm(AR,lambda,sweep,alpha_cr,alpha_ct,epsilon_cr,epsilo
     
     % Flap analysis
     if (flap)
+        % Fix input parameters
+        x_h = x_h / 10;
+        y_inf = y_inf / 20;
+        y_sup = y_sup / 20;
+        eta = deg2rad(eta);
+        
         % Thin Airfoil Theory
         theta_h = acos(1 - 2 * x_h .* c_AC);
         delta_alpha_l0 = zeros(1,M);
         reg_flap = (y_CP >= y_inf & y_CP <= y_sup | y_CP <= -y_inf & y_CP >= -y_sup);
         delta_alpha_l0(reg_flap) = -(1 - theta_h(reg_flap)/pi + sin(theta_h(reg_flap))/pi) * eta;
-
+        
         % Correction factor
         x_factor = deg2rad([10,20,30,40,50,60,70]);
         y_factor = [0.8,0.7,0.53,0.45,0.4,0.36,0.34];
@@ -168,7 +196,7 @@ function [CL,Cl,CM,CD] = hvm(AR,lambda,sweep,alpha_cr,alpha_ct,epsilon_cr,epsilo
     Cl = 2 ./ (delta_y .* c_AC) .* (gamma .* delta_y); % distribution
     
     % Pitching moment coefficient about the leading edge
-    c_aero = (2/3 * cr) * (1 + lambda+ lambda^2) / (1 + lambda);
+    c_aero = (2/3 * c_r) * (1 + lambda+ lambda^2) / (1 + lambda);
     CM = -2/(S * c_aero) * sum(gamma .* AC(1,:) .* delta_y) * cos(alpha);
     
     % Induced drag coefficient
@@ -176,7 +204,9 @@ function [CL,Cl,CM,CD] = hvm(AR,lambda,sweep,alpha_cr,alpha_ct,epsilon_cr,epsilo
     CD = -(2/S) * sum(gamma .* delta_y .* (gamma * w_wake));
     
     % Plots
+    figure;
     plot(y_CP,Cl);
+    title('Lift distribution along the span');
     xlabel('$$\frac{y}{b}$$','Interpreter','latex');
     ylabel('$$C_l$$','Interpreter','latex');
 end
