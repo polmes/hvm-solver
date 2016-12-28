@@ -89,7 +89,7 @@ function [CL,Cl,CM,CD] = hvm(AR,lambda,sweep,alpha_cr,alpha_ct,epsilon_cr,epsilo
     c_AC = c1 + (c2 - c1)/2;
     
     % Aerodynamic Centers
-    y_AC = y1 + abs(y2 - y1)/2;
+    y_AC = y1 + delta_y/2;
     x_AC = c_r/4 + tan(sweep) * abs(y_AC);
     AC = [x_AC; y_AC; zeros(1,M)];
     
@@ -152,9 +152,9 @@ function [CL,Cl,CM,CD] = hvm(AR,lambda,sweep,alpha_cr,alpha_ct,epsilon_cr,epsilo
     % Normal vectors
     n = [sin(epsilon - alpha_l0); zeros(1,M); cos(epsilon - alpha_l0)];
     
-    % Bounding Vortices
-    BV1 = [AC(1,:); AC(2,:) - abs(delta_y)/2; AC(3,:)];
-    BV2 = [AC(1,:); AC(2,:) + abs(delta_y)/2; AC(3,:)];
+    % Bounded Vortices
+    BV1 = [AC(1,:); AC(2,:) - delta_y/2; AC(3,:)];
+    BV2 = [AC(1,:); AC(2,:) + delta_y/2; AC(3,:)];
     
     % Trailing Vortices
     tmp = 20 * ones(1,M);
@@ -196,7 +196,7 @@ function [CL,Cl,CM,CD] = hvm(AR,lambda,sweep,alpha_cr,alpha_ct,epsilon_cr,epsilo
     Cl = 2 ./ (delta_y .* c_AC) .* (gamma .* delta_y); % distribution
     
     % Pitching moment coefficient about the leading edge
-    c_aero = (2/3 * c_r) * (1 + lambda+ lambda^2) / (1 + lambda);
+    c_aero = (2/3 * c_r) * (1 + lambda + lambda^2) / (1 + lambda);
     CM = -2/(S * c_aero) * sum(gamma .* AC(1,:) .* delta_y) * cos(alpha);
     
     % Induced drag coefficient
